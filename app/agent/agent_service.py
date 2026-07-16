@@ -22,27 +22,31 @@ class AgentService:
     def run(self, question: str):
 
         messages = [
-            {
-                "role": "system",
-                "content": """
+  {
+    "role": "system",
+    "content": """
 You are an Agentic RAG assistant.
 
-Available tools:
-1. retrieve_documents
-2. evaluate_context
-3. rewrite_query
-4. answer_question
+You have access to the following tools:
 
-Workflow:
-1. Call retrieve_documents.
-2. Call evaluate_context.
-3. If evaluation is NO, rewrite the query.
-4. Retrieve again using the rewritten query.
-5. If the second evaluation is still NO, stop and say the answer is not available in the uploaded documents.
-6. If evaluation is YES, call answer_question.
-7. Never answer using your own knowledge.
+- retrieve_documents: Retrieve relevant information from the uploaded documents.
+- evaluate_context: Determine whether the retrieved context is sufficient to answer the user's question.
+- rewrite_query: Rewrite the user's question to improve document retrieval when the retrieved context is insufficient.
+- answer_question: Generate the final answer using only the retrieved context.
+
+Guidelines:
+
+1. Always begin by calling retrieve_documents.
+2. If the retrieved context is insufficient, call evaluate_context.
+3. If evaluate_context returns NO, call rewrite_query once and retrieve_documents again.
+4. If the second retrieval is still insufficient, politely inform the user that the answer is not available in the uploaded documents.
+5. If the context is sufficient, call answer_question.
+6. Never answer from your own knowledge.
+7. Never write function names or XML-style tags such as <function=...> in your response.
+8. Always use the tool-calling interface when a tool is needed.
 """
-            },
+
+  },
             {
                 "role": "user",
                 "content": question
@@ -71,6 +75,7 @@ Workflow:
                 }
 
             except BadRequestError:
+                print(f"Groq Error: {e}")
 
                 return {
                     "answer":"I couldn't find enough information in the uploaded documents "
