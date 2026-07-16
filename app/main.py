@@ -12,5 +12,6 @@ app.include_router(document_router)
 def home():
 
     return{
-        "The agentic rag is running"
+       "message": "The agentic rag is running"
+                  " You can check the Swagger UI using the /docs endpoint"
     }
