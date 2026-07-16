@@ -73,7 +73,9 @@ Workflow:
             except BadRequestError:
 
                 return {
-                    "answer": "The agent couldn't complete the tool calling process."
+                    "answer":"I couldn't find enough information in the uploaded documents "
+            "to answer your question. Please try asking about the uploaded "
+            "documents or upload a document that contains the information you need."
                 }
 
             message = response.choices[0].message
