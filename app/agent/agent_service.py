@@ -22,31 +22,38 @@ class AgentService:
     def run(self, question: str):
 
         messages = [
-  {
-    "role": "system",
-    "content": """
+            {
+                "role": "system",
+                "content": """
 You are an Agentic RAG assistant.
 
 You have access to the following tools:
 
-- retrieve_documents: Retrieve relevant information from the uploaded documents.
-- evaluate_context: Determine whether the retrieved context is sufficient to answer the user's question.
-- rewrite_query: Rewrite the user's question to improve document retrieval when the retrieved context is insufficient.
-- answer_question: Generate the final answer using only the retrieved context.
+- retrieve_documents:
+  Retrieve relevant information from the uploaded documents.
+
+- evaluate_context:
+  Evaluate whether the retrieved context is sufficient to answer the user's question.
+
+- rewrite_query:
+  Rewrite the user's question to improve document retrieval.
+
+- answer_question:
+  Generate the final answer using ONLY the retrieved context.
 
 Guidelines:
 
-1. Always begin by calling retrieve_documents.
-2. If the retrieved context is insufficient, call evaluate_context.
-3. If evaluate_context returns NO, call rewrite_query once and retrieve_documents again.
-4. If the second retrieval is still insufficient, politely inform the user that the answer is not available in the uploaded documents.
-5. If the context is sufficient, call answer_question.
-6. Never answer from your own knowledge.
-7. Never write function names or XML-style tags such as <function=...> in your response.
-8. Always use the tool-calling interface when a tool is needed.
+1. Always begin by using retrieve_documents.
+2. After retrieval, use evaluate_context.
+3. If evaluate_context returns YES, use answer_question.
+4. If evaluate_context returns NO, use rewrite_query once and retrieve_documents again.
+5. Evaluate the new context again.
+6. If the second evaluation is still NO, tell the user that the answer is not available in the uploaded documents.
+7. Never answer using your own knowledge.
+8. Always use the provided tool-calling interface.
+9. Never output XML tags, function names, or implementation details.
 """
-
-  },
+            },
             {
                 "role": "user",
                 "content": question
@@ -74,18 +81,21 @@ Guidelines:
                     "answer": "Groq daily token limit reached. Please try again later."
                 }
 
-            except BadRequestError:
+            except BadRequestError as e:
+
                 print(f"Groq Error: {e}")
 
                 return {
-                    "answer":"I couldn't find enough information in the uploaded documents "
-                             "to answer your question. Please try asking about the uploaded "
-                             "documents or upload a document that contains the information you need."
+                    "answer": (
+                        "I couldn't find enough information in the uploaded "
+                        "documents to answer your question. "
+                        "Please ask a question related to the uploaded documents."
+                    )
                 }
 
             message = response.choices[0].message
 
-            # Final response
+            # Final answer from the model
             if not message.tool_calls:
 
                 print("\n========== FINAL ANSWER ==========")
@@ -117,9 +127,9 @@ Guidelines:
                     **arguments
                 )
 
-                # ------------------------------
+                # -------------------------
                 # retrieve_documents
-                # ------------------------------
+                # -------------------------
                 if tool_name == "retrieve_documents":
 
                     print(f"Retrieved {len(tool_result)} chunks")
@@ -145,18 +155,14 @@ Guidelines:
                         }
                     )
 
-                # ------------------------------
+                # -------------------------
                 # evaluate_context
-                # ------------------------------
+                # -------------------------
                 elif tool_name == "evaluate_context":
 
                     print(f"Context Evaluation : {tool_result}")
 
-                    # Stop after the SECOND failed evaluation
-                    if (
-                        tool_result == "NO"
-                        and iteration >= 1
-                    ):
+                    if tool_result == "NO" and iteration >= 1:
 
                         return {
                             "answer": (
@@ -167,32 +173,30 @@ Guidelines:
 
                     tool_content = str(tool_result)
 
-                # ------------------------------
+                # -------------------------
                 # rewrite_query
-                # ------------------------------
+                # -------------------------
                 elif tool_name == "rewrite_query":
 
                     print(f"Rewritten Query : {tool_result}")
 
                     tool_content = str(tool_result)
 
-                # ------------------------------
+                # -------------------------
                 # answer_question
-                # ------------------------------
+                # -------------------------
                 elif tool_name == "answer_question":
 
                     print("Answer generated.")
 
                     tool_content = str(tool_result)
 
-                # ------------------------------
+                # -------------------------
                 # Other tools
-                # ------------------------------
+                # -------------------------
                 elif isinstance(tool_result, (dict, list)):
 
-                    tool_content = json.dumps(
-                        tool_result
-                    )
+                    tool_content = json.dumps(tool_result)
 
                 else:
 
