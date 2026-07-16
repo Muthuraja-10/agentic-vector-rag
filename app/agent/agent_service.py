@@ -1,6 +1,10 @@
 import json
 
-from groq import Groq, RateLimitError
+from groq import (
+    Groq,
+    RateLimitError,
+    BadRequestError
+)
 
 from app.core.config import settings
 from app.tools.tool_registry import TOOLS
@@ -30,13 +34,13 @@ Available tools:
 4. answer_question
 
 Workflow:
-1. First call retrieve_documents.
-2. Then call evaluate_context.
-3. If evaluate_context returns NO, call rewrite_query.
+1. Call retrieve_documents.
+2. Call evaluate_context.
+3. If evaluation is NO, rewrite the query.
 4. Retrieve again using the rewritten query.
-5. Repeat until the context is sufficient.
-6. Finally call answer_question.
-7. Never answer from your own knowledge.
+5. If the second evaluation is still NO, stop and say the answer is not available in the uploaded documents.
+6. If evaluation is YES, call answer_question.
+7. Never answer using your own knowledge.
 """
             },
             {
@@ -66,9 +70,15 @@ Workflow:
                     "answer": "Groq daily token limit reached. Please try again later."
                 }
 
+            except BadRequestError:
+
+                return {
+                    "answer": "The agent couldn't complete the tool calling process."
+                }
+
             message = response.choices[0].message
 
-            # Final answer from LLM
+            # Final response
             if not message.tool_calls:
 
                 print("\n========== FINAL ANSWER ==========")
@@ -88,7 +98,7 @@ Workflow:
                     tool_call.function.arguments
                 )
 
-                print(f"\nTool -> {tool_name}")
+                print(f"Tool -> {tool_name}")
 
                 if tool_name not in TOOL_FUNCTIONS:
 
@@ -100,7 +110,9 @@ Workflow:
                     **arguments
                 )
 
-                # Clean logging
+                # ------------------------------
+                # retrieve_documents
+                # ------------------------------
                 if tool_name == "retrieve_documents":
 
                     print(f"Retrieved {len(tool_result)} chunks")
@@ -108,7 +120,10 @@ Workflow:
                     if not tool_result:
 
                         return {
-                            "answer": "No relevant documents were found."
+                            "answer": (
+                                "I couldn't find enough relevant information "
+                                "in the uploaded documents."
+                            )
                         }
 
                     context = "\n\n".join(
@@ -123,13 +138,17 @@ Workflow:
                         }
                     )
 
+                # ------------------------------
+                # evaluate_context
+                # ------------------------------
                 elif tool_name == "evaluate_context":
 
                     print(f"Context Evaluation : {tool_result}")
 
+                    # Stop after the SECOND failed evaluation
                     if (
                         tool_result == "NO"
-                        and iteration == max_iterations - 1
+                        and iteration >= 1
                     ):
 
                         return {
@@ -141,21 +160,32 @@ Workflow:
 
                     tool_content = str(tool_result)
 
+                # ------------------------------
+                # rewrite_query
+                # ------------------------------
                 elif tool_name == "rewrite_query":
 
                     print(f"Rewritten Query : {tool_result}")
 
                     tool_content = str(tool_result)
 
+                # ------------------------------
+                # answer_question
+                # ------------------------------
                 elif tool_name == "answer_question":
 
-                    print("Final answer generated.")
+                    print("Answer generated.")
 
                     tool_content = str(tool_result)
 
+                # ------------------------------
+                # Other tools
+                # ------------------------------
                 elif isinstance(tool_result, (dict, list)):
 
-                    tool_content = json.dumps(tool_result)
+                    tool_content = json.dumps(
+                        tool_result
+                    )
 
                 else:
 
