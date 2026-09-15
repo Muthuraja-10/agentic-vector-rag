@@ -83,10 +83,19 @@ Guidelines:
             }
         ]
 
-        # Prevent infinite agent/tool loops
+        # Maximum number of LLM/tool iterations.
+        # Allows the complete retry flow:
+        #
+        # 1. retrieve
+        # 2. evaluate -> NO
+        # 3. rewrite
+        # 4. retrieve
+        # 5. evaluate
+        # 6. answer
+        # 7. final response
         max_iterations = 7
 
-        # Track whether query rewriting has already happened
+        # Allows only one query rewrite attempt.
         rewrite_attempted = False
 
         for iteration in range(max_iterations):
@@ -94,6 +103,10 @@ Guidelines:
             print(
                 f"\n========== ITERATION {iteration + 1} =========="
             )
+
+            # --------------------------------
+            # Ask the LLM what to do next
+            # --------------------------------
 
             try:
 
@@ -125,6 +138,7 @@ Guidelines:
                     )
                 }
 
+            # Get the assistant message
             message = response.choices[0].message
 
             # --------------------------------
@@ -133,14 +147,20 @@ Guidelines:
 
             if not message.tool_calls:
 
-                print("\n========== FINAL ANSWER ==========")
+                print(
+                    "\n========== FINAL ANSWER =========="
+                )
+
                 print(message.content)
 
                 return {
                     "answer": message.content
                 }
 
-            # Add assistant message containing tool calls
+            # --------------------------------
+            # Store assistant tool-call message
+            # --------------------------------
+
             messages.append(message)
 
             # --------------------------------
@@ -151,29 +171,73 @@ Guidelines:
 
                 tool_name = tool_call.function.name
 
-                arguments = json.loads(
-                    tool_call.function.arguments
+                print(
+                    f"Tool -> {tool_name}"
                 )
 
-                print(f"Tool -> {tool_name}")
+                # --------------------------------
+                # Parse tool arguments
+                # --------------------------------
+
+                try:
+
+                    arguments = json.loads(
+                        tool_call.function.arguments
+                    )
+
+                except json.JSONDecodeError:
+
+                    print(
+                        f"Invalid JSON arguments for tool: "
+                        f"{tool_name}"
+                    )
+
+                    return {
+                        "answer": (
+                            "The agent generated an invalid "
+                            "tool request."
+                        )
+                    }
 
                 # --------------------------------
-                # Check whether the tool exists
+                # Check whether tool exists
                 # --------------------------------
 
                 if tool_name not in TOOL_FUNCTIONS:
 
-                    raise ValueError(
-                        f"Unknown tool: {tool_name}"
+                    print(
+                        f"Unknown tool requested: {tool_name}"
                     )
 
+                    return {
+                        "answer": (
+                            "The agent requested an unknown tool."
+                        )
+                    }
+
                 # --------------------------------
-                # Execute actual Python function
+                # Execute actual Python tool
                 # --------------------------------
 
-                tool_result = TOOL_FUNCTIONS[tool_name](
-                    **arguments
-                )
+                try:
+
+                    tool_result = TOOL_FUNCTIONS[tool_name](
+                        **arguments
+                    )
+
+                except Exception as e:
+
+                    print(
+                        f"Tool execution error "
+                        f"({tool_name}): {e}"
+                    )
+
+                    return {
+                        "answer": (
+                            "An error occurred while executing "
+                            "the requested tool."
+                        )
+                    }
 
                 # --------------------------------
                 # retrieve_documents
@@ -185,7 +249,7 @@ Guidelines:
                         f"Retrieved {len(tool_result)} chunks"
                     )
 
-                    # No results
+                    # No retrieval results
                     if not tool_result:
 
                         return {
@@ -195,7 +259,8 @@ Guidelines:
                             )
                         }
 
-                    # Combine retrieved chunks into context
+                    # Combine retrieved chunks
+                    # into the context sent to the LLM
                     context = "\n\n".join(
                         chunk["text"]
                         for chunk in tool_result
@@ -218,12 +283,39 @@ Guidelines:
                         f"Context Evaluation : {tool_result}"
                     )
 
-                    # If context is insufficient
+                    # --------------------------------
+                    # First NO
+                    # --------------------------------
+                    #
+                    # If rewriting has not happened yet,
+                    # allow the agent to continue.
+                    #
+                    # The LLM should call rewrite_query.
+                    # --------------------------------
+
                     if tool_result == "NO":
 
-                        # If rewriting has already happened,
-                        # this is the second failed evaluation.
-                        if rewrite_attempted:
+                        if not rewrite_attempted:
+
+                            print(
+                                "Context insufficient. "
+                                "Rewrite is allowed."
+                            )
+
+                        # --------------------------------
+                        # Second NO
+                        # --------------------------------
+                        #
+                        # Rewrite has already happened,
+                        # so stop the agent.
+                        # --------------------------------
+
+                        else:
+
+                            print(
+                                "Context still insufficient "
+                                "after rewrite. Stopping agent."
+                            )
 
                             return {
                                 "answer": (
@@ -233,23 +325,33 @@ Guidelines:
                                 )
                             }
 
-                    tool_content = str(tool_result)
+                    tool_content = str(
+                        tool_result
+                    )
 
                 # --------------------------------
                 # rewrite_query
                 # --------------------------------
 
                 elif tool_name == "rewrite_query":
-                    print(f"Rewrite attempted: {rewrite_attempted}")
-                    print(
-                        f"Rewritten Query : {tool_result}"
-                    )
 
-                    # Mark that the single rewrite attempt
-                    # has now been used.
+                    # Mark rewrite as used BEFORE
+                    # continuing the agent loop.
                     rewrite_attempted = True
 
-                    tool_content = str(tool_result)
+                    print(
+                        f"Rewrite attempted: "
+                        f"{rewrite_attempted}"
+                    )
+
+                    print(
+                        f"Rewritten Query : "
+                        f"{tool_result}"
+                    )
+
+                    tool_content = str(
+                        tool_result
+                    )
 
                 # --------------------------------
                 # answer_question
@@ -257,15 +359,22 @@ Guidelines:
 
                 elif tool_name == "answer_question":
 
-                    print("Answer generated.")
+                    print(
+                        "Answer generated."
+                    )
 
-                    tool_content = str(tool_result)
+                    tool_content = str(
+                        tool_result
+                    )
 
                 # --------------------------------
-                # Convert other result types
+                # Other result types
                 # --------------------------------
 
-                elif isinstance(tool_result, (dict, list)):
+                elif isinstance(
+                    tool_result,
+                    (dict, list)
+                ):
 
                     tool_content = json.dumps(
                         tool_result
@@ -293,6 +402,12 @@ Guidelines:
         # Maximum iterations reached
         # --------------------------------
 
+        print(
+            "\nMaximum agent iterations reached."
+        )
+
         return {
-            "answer": "Maximum agent iterations reached."
+            "answer": (
+                "Maximum agent iterations reached."
+            )
         }
