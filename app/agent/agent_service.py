@@ -83,7 +83,11 @@ Guidelines:
             }
         ]
 
-        max_iterations = 5
+        # Prevent infinite agent/tool loops
+        max_iterations = 7
+
+        # Track whether query rewriting has already happened
+        rewrite_attempted = False
 
         for iteration in range(max_iterations):
 
@@ -140,7 +144,7 @@ Guidelines:
             messages.append(message)
 
             # --------------------------------
-            # Execute each requested tool
+            # Execute requested tools
             # --------------------------------
 
             for tool_call in message.tool_calls:
@@ -153,14 +157,20 @@ Guidelines:
 
                 print(f"Tool -> {tool_name}")
 
+                # --------------------------------
                 # Check whether the tool exists
+                # --------------------------------
+
                 if tool_name not in TOOL_FUNCTIONS:
 
                     raise ValueError(
                         f"Unknown tool: {tool_name}"
                     )
 
-                # Execute the actual Python function
+                # --------------------------------
+                # Execute actual Python function
+                # --------------------------------
+
                 tool_result = TOOL_FUNCTIONS[tool_name](
                     **arguments
                 )
@@ -208,20 +218,20 @@ Guidelines:
                         f"Context Evaluation : {tool_result}"
                     )
 
-                    # If second evaluation is NO,
-                    # stop the agent.
-                    if (
-                        tool_result == "NO"
-                        and iteration >= 1
-                    ):
+                    # If context is insufficient
+                    if tool_result == "NO":
 
-                        return {
-                            "answer": (
-                                "I couldn't find enough relevant "
-                                "information in the uploaded documents "
-                                "to answer your question."
-                            )
-                        }
+                        # If rewriting has already happened,
+                        # this is the second failed evaluation.
+                        if rewrite_attempted:
+
+                            return {
+                                "answer": (
+                                    "I couldn't find enough relevant "
+                                    "information in the uploaded documents "
+                                    "to answer your question."
+                                )
+                            }
 
                     tool_content = str(tool_result)
 
@@ -230,10 +240,14 @@ Guidelines:
                 # --------------------------------
 
                 elif tool_name == "rewrite_query":
-
+                    print(f"Rewrite attempted: {rewrite_attempted}")
                     print(
                         f"Rewritten Query : {tool_result}"
                     )
+
+                    # Mark that the single rewrite attempt
+                    # has now been used.
+                    rewrite_attempted = True
 
                     tool_content = str(tool_result)
 
@@ -263,7 +277,10 @@ Guidelines:
                         tool_result
                     )
 
-                # Send tool result back to the LLM
+                # --------------------------------
+                # Send tool result back to LLM
+                # --------------------------------
+
                 messages.append(
                     {
                         "role": "tool",
@@ -271,6 +288,10 @@ Guidelines:
                         "content": tool_content
                     }
                 )
+
+        # --------------------------------
+        # Maximum iterations reached
+        # --------------------------------
 
         return {
             "answer": "Maximum agent iterations reached."
