@@ -31,6 +31,15 @@ class RetrievalService:
         retrieved_chunks = []
 
         for match in matches:
+
+            print(
+        f"\n--- Retrieved Chunk ---"
+        f"\nRank: {len(retrieved_chunks) + 1}"
+        f"\nScore: {match.score}"
+        f"\nFile: {match.metadata['filename']}"
+        f"\nChunk Index: {match.metadata['chunk_index']}"
+        f"\nText: {match.metadata['text'][:300]}..."
+    )
             retrieved_chunks.append(
                 {
                     "score": match.score,
